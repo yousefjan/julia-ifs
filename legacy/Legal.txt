@@ -1,0 +1,10 @@
+Legal note:
+
+This program: "3D Reversed Julia IFS.exe" and the C source-code are part of the public domain (PD). Distrubute and make copys freely. You are also welcome to create your own version of the program from the source-code. If you do - and does it good? Then post a link (for download) or a zipfile to:
+
+	sol_developments
+	@
+	hotmail.com
+
+SunCode 
+26 Mar 2005.

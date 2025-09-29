@@ -1,0 +1,1 @@
+/Users/yousefjan/yousefjan/julia-ifs/rust/target/debug/julia-ifs-rs: /Users/yousefjan/yousefjan/julia-ifs/rust/src/buffers.rs /Users/yousefjan/yousefjan/julia-ifs/rust/src/constants.rs /Users/yousefjan/yousefjan/julia-ifs/rust/src/main.rs /Users/yousefjan/yousefjan/julia-ifs/rust/src/palette.rs /Users/yousefjan/yousefjan/julia-ifs/rust/src/renderer.rs
