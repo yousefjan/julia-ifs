@@ -33,6 +33,8 @@ impl Framebuffers {
     }
 
     pub fn clear_z(&mut self) { self.zbuf.fill(ZDEPTH); }
+
+    pub fn clear_light(&mut self) { self.light.fill(ZDEPTH); }
 }
 
 

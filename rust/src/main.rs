@@ -3,8 +3,11 @@ mod constants;
 mod buffers;
 mod renderer;
 mod transforms;
+mod camera;
+mod light;
 
 use minifb::{Key, Window, WindowOptions};
+use buffers::Framebuffers;
 
 fn main() {
     let width = constants::WIDTH as usize;
@@ -23,9 +26,13 @@ fn main() {
     .expect("Unable to create window");
 
     let mut frame = vec![0u32; width * height];
+    let mut fb = Framebuffers::new();
+    let mut cam = camera::Camera::new();
+    let mut light = light::LightCam::new();
+    let mut show_shadows = true;
 
     let mut pal = palette::Palette::new();
-    pal.randomize();
+    pal.randomize_with_seed(0x5EED);
 
     let mut tick: u32 = 0;
     let mut mode = renderer::Mode::Julia2D;
@@ -34,10 +41,39 @@ fn main() {
             pal.randomize();
         }
         if window.is_key_pressed(Key::M, minifb::KeyRepeat::No) {
-            mode = match mode { renderer::Mode::Julia2D => renderer::Mode::IFS2D, _ => renderer::Mode::Julia2D };
+            mode = match mode {
+                renderer::Mode::Julia2D => renderer::Mode::IFS2D,
+                renderer::Mode::IFS2D => renderer::Mode::IFS3D,
+                renderer::Mode::IFS3D => renderer::Mode::Julia2D,
+            };
         }
+        if window.is_key_pressed(Key::S, minifb::KeyRepeat::No) { show_shadows = !show_shadows; }
+        // camera controls
+        if window.is_key_down(Key::Left) { cam.yaw -= 0.03; }
+        if window.is_key_down(Key::Right) { cam.yaw += 0.03; }
+        if window.is_key_down(Key::Up) { cam.pitch = (cam.pitch + 0.03).clamp(-1.2, 1.2); }
+        if window.is_key_down(Key::Down) { cam.pitch = (cam.pitch - 0.03).clamp(-1.2, 1.2); }
+        if window.is_key_down(Key::Z) { cam.dist = (cam.dist - 0.05).max(1.5); }
+        if window.is_key_down(Key::X) { cam.dist = (cam.dist + 0.05).min(8.0); }
+        if window.is_key_pressed(Key::R, minifb::KeyRepeat::No) { cam = camera::Camera::new(); }
 
-        renderer::render(&mut frame, width, height, &pal, tick, mode);
+        if let renderer::Mode::IFS3D = mode {
+            if show_shadows { fb.clear_light(); }
+            renderer::render(
+                &mut frame,
+                width,
+                height,
+                &pal,
+                tick,
+                mode,
+                Some(&mut fb.zbuf),
+                Some(&cam),
+                if show_shadows { Some(&light) } else { None },
+                if show_shadows { Some(&mut fb.light) } else { None },
+            );
+        } else {
+            renderer::render(&mut frame, width, height, &pal, tick, mode, None, None, None, None);
+        }
         tick = tick.wrapping_add(1);
 
         window

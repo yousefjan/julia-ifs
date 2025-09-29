@@ -1,4 +1,5 @@
-use rand::Rng;
+use rand::{Rng, SeedableRng};
+use rand::rngs::StdRng;
 
 use crate::constants::PALSIZE;
 
@@ -27,6 +28,16 @@ impl Palette {
 
     pub fn randomize(&mut self) {
         let mut rng = rand::thread_rng();
+        self.freq = 1.0 + rng.gen::<f32>().powf(3.0) * 256.0;
+        self.phase_r = self.freq * rng.gen::<f32>() * std::f32::consts::PI;
+        self.phase_g = self.freq * rng.gen::<f32>() * std::f32::consts::PI;
+        self.phase_b = self.freq * rng.gen::<f32>() * std::f32::consts::PI;
+        self.invert = rng.gen::<f32>() > 0.75;
+        self.build();
+    }
+
+    pub fn randomize_with_seed(&mut self, seed: u64) {
+        let mut rng = StdRng::seed_from_u64(seed);
         self.freq = 1.0 + rng.gen::<f32>().powf(3.0) * 256.0;
         self.phase_r = self.freq * rng.gen::<f32>() * std::f32::consts::PI;
         self.phase_g = self.freq * rng.gen::<f32>() * std::f32::consts::PI;
