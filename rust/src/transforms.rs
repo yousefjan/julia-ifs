@@ -161,13 +161,13 @@ pub fn set3_c(mut x: f32, mut y: f32, mut z: f32) -> (f32, f32, f32) {
 }
 
 #[inline]
-pub fn set3_d(mut x: f32, mut y: f32, mut z: f32) -> (f32, f32, f32) {
+pub fn set3_d(mut x: f32, mut y: f32, mut z: f32, randu: f32) -> (f32, f32, f32) {
     let mut length = (x * x + y * y + z * z).sqrt();
     if length > 0.0 {
         let amp = length.sqrt();
         if length == x.abs() {
             if x < 0.0 {
-                let angle = (tick_hash(x, y, z) * std::f32::consts::PI);
+                let angle = (randu * std::f32::consts::PI);
                 y = angle.cos() * amp;
                 z = angle.sin() * amp;
                 x = 0.0;
@@ -188,13 +188,13 @@ pub fn set3_d(mut x: f32, mut y: f32, mut z: f32) -> (f32, f32, f32) {
 }
 
 #[inline]
-pub fn set3_e(mut x: f32, mut y: f32, mut z: f32) -> (f32, f32, f32) {
+pub fn set3_e(mut x: f32, mut y: f32, mut z: f32, randu: f32) -> (f32, f32, f32) {
     let mut length = (x * x + y * y + z * z).sqrt();
     if length > 0.0 {
         let amp = length.powf(1.0 / 3.0);
         if length == x.abs() {
             if x < 0.0 {
-                let angle = (tick_hash(x, y, z) * std::f32::consts::PI);
+                let angle = (randu * std::f32::consts::PI);
                 y = angle.cos() * amp;
                 z = angle.sin() * amp;
                 x = 0.0;
@@ -223,13 +223,13 @@ pub fn set3_e(mut x: f32, mut y: f32, mut z: f32) -> (f32, f32, f32) {
 }
 
 #[inline]
-pub fn set3_d3(mut x: f32, mut y: f32, mut z: f32) -> (f32, f32, f32) {
+pub fn set3_d3(mut x: f32, mut y: f32, mut z: f32, randu: f32) -> (f32, f32, f32) {
     let mut length = (x * x + y * y + z * z).sqrt();
     if length > 0.0 {
         let amp = length.powf(1.0 / 3.0);
         if length == x.abs() {
             if x < 0.0 {
-                let angle = (tick_hash(x, y, z) * std::f32::consts::PI);
+                let angle = (randu * std::f32::consts::PI);
                 y = angle.cos() * amp;
                 z = angle.sin() * amp;
                 x = 0.0;
@@ -248,6 +248,6 @@ pub fn set3_d3(mut x: f32, mut y: f32, mut z: f32) -> (f32, f32, f32) {
 }
 
 #[inline]
-fn tick_hash(x: f32, y: f32, z: f32) -> f32 { ((x + 3.1 * y + 5.3 * z).sin() * 0.5 + 0.5).max(0.0) }
+fn tick_hash(_x: f32, _y: f32, _z: f32) -> f32 { 0.5 }
 
 

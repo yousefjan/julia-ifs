@@ -30,6 +30,8 @@ fn main() {
     let mut cam = camera::Camera::new();
     let mut light = light::LightCam::new();
     let mut show_shadows = true;
+    let mut samples_view: usize = (width * height) / 6; // default balanced
+    let mut samples_light: usize = (width * height) / 8;
 
     let mut pal = palette::Palette::new();
     pal.randomize_with_seed(0x5EED);
@@ -48,6 +50,14 @@ fn main() {
             };
         }
         if window.is_key_pressed(Key::S, minifb::KeyRepeat::No) { show_shadows = !show_shadows; }
+        if window.is_key_pressed(Key::Minus, minifb::KeyRepeat::No) {
+            samples_view = (samples_view.saturating_sub((width * height) / 12)).max((width * height) / 40);
+            samples_light = samples_light.saturating_sub((width * height) / 16).max((width * height) / 64);
+        }
+        if window.is_key_pressed(Key::Equal, minifb::KeyRepeat::No) {
+            samples_view = (samples_view + (width * height) / 12).min(width * height * 2);
+            samples_light = (samples_light + (width * height) / 16).min(width * height * 2);
+        }
         // camera controls
         if window.is_key_down(Key::Left) { cam.yaw -= 0.03; }
         if window.is_key_down(Key::Right) { cam.yaw += 0.03; }
@@ -70,9 +80,11 @@ fn main() {
                 Some(&cam),
                 if show_shadows { Some(&light) } else { None },
                 if show_shadows { Some(&mut fb.light) } else { None },
+                samples_view,
+                if show_shadows { samples_light } else { 0 },
             );
         } else {
-            renderer::render(&mut frame, width, height, &pal, tick, mode, None, None, None, None);
+            renderer::render(&mut frame, width, height, &pal, tick, mode, None, None, None, None, samples_view, 0);
         }
         tick = tick.wrapping_add(1);
 

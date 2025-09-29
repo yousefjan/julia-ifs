@@ -9,7 +9,20 @@ use rand::rngs::StdRng;
 #[derive(Copy, Clone)]
 pub enum Mode { Julia2D, IFS2D, IFS3D }
 
-pub fn render(framebuffer: &mut [u32], width: usize, height: usize, palette: &Palette, tick: u32, mode: Mode, mut zbuffer: Option<&mut [i32]>, camera: Option<&Camera>, light: Option<&LightCam>, mut lightbuf: Option<&mut [i32]>) {
+pub fn render(
+    framebuffer: &mut [u32],
+    width: usize,
+    height: usize,
+    palette: &Palette,
+    tick: u32,
+    mode: Mode,
+    mut zbuffer: Option<&mut [i32]>,
+    camera: Option<&Camera>,
+    light: Option<&LightCam>,
+    mut lightbuf: Option<&mut [i32]>,
+    samples_view: usize,
+    samples_light: usize,
+) {
     let w = width as f32;
     let h = height as f32;
     let aspect = w / h.max(1.0);
@@ -47,28 +60,48 @@ pub fn render(framebuffer: &mut [u32], width: usize, height: usize, palette: &Pa
             }
         }
         Mode::IFS2D => {
-            // Simple 2D IFS using set2d/set2d3 alternation
-            let mut x = 0.01f32;
-            let mut y = 0.0f32;
-            for i in 0..(width * height * 10) {
-                if (i & 1) == 0 { let r = transforms::set2d(x, y); x = r.0; y = r.1; }
-                else { let r = transforms::set2d3(x, y); x = r.0; y = r.1; }
-
-                let sx = ((x * 0.45 + 0.5) * w) as i32;
-                let sy = ((y * 0.45 + 0.5) * h) as i32;
+            framebuffer.fill(BGCOLOR);
+            // 4-map affine IFS filling a square (scale 1/2)
+            let tx = [-0.5f32, 0.5, 0.5, -0.5];
+            let ty = [-0.5f32, -0.5, 0.5, 0.5];
+            let s = 0.5f32;
+            let mut rng = StdRng::seed_from_u64(0x1F5_2D);
+            let mut x = rng.gen_range(-0.5..0.5);
+            let mut y = rng.gen_range(-0.5..0.5);
+            // burn-in to reach attractor
+            for _ in 0..5000 {
+                let i = rng.gen_range(0..4);
+                x = (x - tx[i]) * s + tx[i];
+                y = (y - ty[i]) * s + ty[i];
+            }
+            let total = width * height * 6;
+            for i in 0..total {
+                let bi = rng.gen_range(0..4);
+                x = (x - tx[bi]) * s + tx[bi];
+                y = (y - ty[bi]) * s + ty[bi];
+                let sx = ((x + 0.5) * w) as i32;
+                let sy = ((y + 0.5) * h) as i32;
                 if sx >= 0 && sy >= 0 && (sx as usize) < width && (sy as usize) < height {
-                    let idx = ((i as u32 * 7) & (PALSIZE as u32 - 1)) as usize;
+                    let idx = (((i as u32) * 11 + (bi as u32) * 97) & (PALSIZE as u32 - 1)) as usize;
                     framebuffer[sy as usize * width + sx as usize] = palette.colors[idx];
                 }
             }
         }
         Mode::IFS3D => {
+            // Clear previous visuals each frame for clean IFS rendering
+            framebuffer.fill(BGCOLOR);
             let zbuf = match zbuffer.as_deref_mut() { Some(z) => z, None => {
                 // fallback: plot without z if none provided
                 let mut rng = StdRng::seed_from_u64(tick as u64 + 12345);
-                let mut x = 0.1f32; let mut y = 0.0f32; let mut z = 0.0f32;
-                for i in 0..(width * height * 6) {
-                    iterate_point(&mut x, &mut y, &mut z, &mut rng);
+                let mut x = rng.gen_range(-0.5..0.5); let mut y = rng.gen_range(-0.5..0.5); let mut z = rng.gen_range(-0.5..0.5);
+                // choose single transform family for this frame
+                let set_idx = rng.gen_range(0..6);
+                let c3 = (c_x as f32, c_y as f32, 0.0f32);
+                // burn-in iterations to converge to attractor
+                let burn_in = (samples_view / 10).max(300).min(4000);
+                for _ in 0..burn_in { iterate_point_fixed(&mut x, &mut y, &mut z, &mut rng, set_idx, c3); }
+                for i in 0..(samples_view.max(width * height / 8)) {
+                    iterate_point_fixed(&mut x, &mut y, &mut z, &mut rng, set_idx, c3);
                     let Some((sx, sy, _zc)) = camera.and_then(|cam| cam.view_project(x, y, z, width, height, 240.0)) else { continue };
                     if sx>=0 && sy>=0 && (sx as usize) < width && (sy as usize) < height {
                         let idx = ((i as u32 * 11) & (PALSIZE as u32 - 1)) as usize;
@@ -81,13 +114,18 @@ pub fn render(framebuffer: &mut [u32], width: usize, height: usize, palette: &Pa
             for z in zbuf.iter_mut() { *z = ZDEPTH; }
             let mut rng_light = StdRng::seed_from_u64(tick as u64 + 9999);
             let mut rng_view = StdRng::seed_from_u64(tick as u64 + 9999);
+            // choose single transform family and julia constant
+            let set_idx = rng_view.gen_range(0..6);
+            let c3 = (c_x as f32, c_y as f32, 0.0f32);
 
             // build light map first if requested
             if let (Some(light_cam), Some(lbuf)) = (light, lightbuf.as_deref_mut()) {
                 lbuf.fill(ZDEPTH);
-                let mut lx = 0.1f32; let mut ly = 0.0f32; let mut lz = 0.0f32;
-                for _ in 0..(width * height * 10) {
-                    iterate_point(&mut lx, &mut ly, &mut lz, &mut rng_light);
+                let mut lx = rng_light.gen_range(-0.5..0.5); let mut ly = rng_light.gen_range(-0.5..0.5); let mut lz = rng_light.gen_range(-0.5..0.5);
+                let burn_in_l = (samples_light / 10).max(200).min(3000);
+                for _ in 0..burn_in_l { iterate_point_fixed(&mut lx, &mut ly, &mut lz, &mut rng_light, set_idx, c3); }
+                for _ in 0..samples_light {
+                    iterate_point_fixed(&mut lx, &mut ly, &mut lz, &mut rng_light, set_idx, c3);
                     let Some((lsX, lsY, lzc)) = light_cam.project(lx, ly, lz, width, height, 280.0) else { continue };
                     if lsX<0 || lsY<0 || (lsX as usize) >= width || (lsY as usize) >= height { continue; }
                     let ldepth = ((lzc * 2048.0) as i32).clamp(0, ZDEPTH - 1);
@@ -96,9 +134,11 @@ pub fn render(framebuffer: &mut [u32], width: usize, height: usize, palette: &Pa
                 }
             }
 
-            let mut x = 0.1f32; let mut y = 0.0f32; let mut z = 0.0f32;
-            for i in 0..(width * height * 8) {
-                iterate_point(&mut x, &mut y, &mut z, &mut rng_view);
+            let mut x = rng_view.gen_range(-0.5..0.5); let mut y = rng_view.gen_range(-0.5..0.5); let mut z = rng_view.gen_range(-0.5..0.5);
+            let burn_in_v = (samples_view / 10).max(300).min(4000);
+            for _ in 0..burn_in_v { iterate_point_fixed(&mut x, &mut y, &mut z, &mut rng_view, set_idx, c3); }
+            for i in 0..samples_view {
+                iterate_point_fixed(&mut x, &mut y, &mut z, &mut rng_view, set_idx, c3);
                 let Some((sx, sy, zc)) = camera.and_then(|cam| cam.view_project(x, y, z, width, height, 260.0)) else { continue };
                 if sx<0 || sy<0 || (sx as usize) >= width || (sy as usize) >= height { continue; }
                 let depth = ((zc * 2048.0) as i32).clamp(0, ZDEPTH - 1);
@@ -131,25 +171,25 @@ pub fn render(framebuffer: &mut [u32], width: usize, height: usize, palette: &Pa
 }
 
 #[inline]
-fn iterate_point(x: &mut f32, y: &mut f32, z: &mut f32, rng: &mut StdRng) {
-    // choose transform
-    match rng.gen_range(0..6) {
+fn iterate_point_fixed(x: &mut f32, y: &mut f32, z: &mut f32, rng: &mut StdRng, set_idx: i32, c3: (f32,f32,f32)) {
+    // subtract Julia constant each iteration
+    *x -= c3.0; *y -= c3.1; *z -= c3.2;
+    // apply selected transform family
+    match set_idx {
         0 => { let r = transforms::set3_a(*x,*y,*z); *x=r.0; *y=r.1; *z=r.2; }
         1 => { let r = transforms::set3_b(*x,*y,*z); *x=r.0; *y=r.1; *z=r.2; }
         2 => { let r = transforms::set3_c(*x,*y,*z); *x=r.0; *y=r.1; *z=r.2; }
-        3 => { let r = transforms::set3_d(*x,*y,*z); *x=r.0; *y=r.1; *z=r.2; }
-        4 => { let r = transforms::set3_e(*x,*y,*z); *x=r.0; *y=r.1; *z=r.2; }
-        _ => { let r = transforms::set3_d3(*x,*y,*z); *x=r.0; *y=r.1; *z=r.2; }
+        3 => { let r = transforms::set3_d(*x,*y,*z, rng.gen()); *x=r.0; *y=r.1; *z=r.2; }
+        4 => { let r = transforms::set3_e(*x,*y,*z, rng.gen()); *x=r.0; *y=r.1; *z=r.2; }
+        _ => { let r = transforms::set3_d3(*x,*y,*z, rng.gen()); *x=r.0; *y=r.1; *z=r.2; }
     }
-    // symmetry mods similar to MOD8X / 6X
-    if rng.gen_bool(0.33) {
-        // 8X flips
+    // symmetry: pick either 8X flips or 6X rotation with small probability
+    if rng.gen_bool(0.3) {
         let mask = rng.gen_range(0u8..8);
         if (mask & 0x4) != 0 { *x = -*x; }
         if (mask & 0x2) != 0 { *y = -*y; }
         if (mask & 0x1) != 0 { *z = -*z; }
-    } else if rng.gen_bool(0.2) {
-        // 6X rotation (x,y,z) -> (z,x,y)
+    } else if rng.gen_bool(0.15) {
         let tx = -*y; *y = *z; *z = *x; *x = tx;
     }
 }
