@@ -9,6 +9,23 @@ use rand::rngs::StdRng;
 #[derive(Copy, Clone)]
 pub enum Mode { Julia2D, IFS2D, IFS3D }
 
+#[derive(Copy, Clone)]
+pub struct IfsControl {
+    pub time_scale: f32,        // scales animation speed for c_x/c_y
+    pub freeze_sets: bool,      // if true, seeds and set selections are fixed
+    pub set2d_variant: Option<i32>, // Some(0)=SET2D, Some(1)=SET2D3, None=random
+    pub set3d_index: Option<i32>,   // 0..=5 selects 3D family, None=random
+    pub freeze_c: bool,         // if true, c_x/c_y are static for IFS modes
+    pub c_x: f32,               // fixed Julia constant x for IFS modes
+    pub c_y: f32,               // fixed Julia constant y for IFS modes
+}
+
+impl Default for IfsControl {
+    fn default() -> Self {
+        Self { time_scale: 1.0, freeze_sets: false, set2d_variant: None, set3d_index: None, freeze_c: true, c_x: 0.285, c_y: 0.01 }
+    }
+}
+
 pub fn render(
     framebuffer: &mut [u32],
     width: usize,
@@ -22,22 +39,55 @@ pub fn render(
     mut lightbuf: Option<&mut [i32]>,
     samples_view: usize,
     samples_light: usize,
+    ifs: &IfsControl,
 ) {
     let w = width as f32;
     let h = height as f32;
     let aspect = w / h.max(1.0);
 
-    let t = tick as f32 * 0.015;
-    let c_x = 0.285 + 0.25 * (t * 0.91).sin();
-    let c_y = 0.01 + 0.25 * (t * 1.13).cos();
+    let t = tick as f32 * 0.015 * ifs.time_scale;
+    let anim_cx = 0.285 + 0.25 * (t * 0.91).sin();
+    let anim_cy = 0.01 + 0.25 * (t * 1.13).cos();
+    let (ifs_cx, ifs_cy) = if ifs.freeze_c { (ifs.c_x, ifs.c_y) } else { (anim_cx, anim_cy) };
 
     match mode {
         Mode::Julia2D => {
-            let max_iter: u32 = 256;
-            for y in 0..height {
+            // Adaptive budget: probe complexity, then adjust iterations and stride
+            let mut probe_sum = 0u32;
+            let probe_iter_max: u32 = 160;
+            let probes = 64usize;
+            for py in 0..8 {
+                let sy = (py * (height.max(1) / 8)).min(height.saturating_sub(1));
+                let ny = (sy as f32 / h) * 2.0 - 1.0;
+                let zy0 = ny * 1.6;
+                for px in 0..8 {
+                    let sx = (px * (width.max(1) / 8)).min(width.saturating_sub(1));
+                    let nx = (sx as f32 / w) * 2.0 - 1.0;
+                    let zx0 = nx * 1.6 * aspect;
+                    let mut zx = zx0; let mut zy = zy0; let mut i = 0u32;
+                    while i < probe_iter_max {
+                        let zx2 = zx * zx; let zy2 = zy * zy;
+                        if zx2 + zy2 > 4.0 { break; }
+                        let two_zx_zy = 2.0 * zx * zy;
+                        zx = zx2 - zy2 + anim_cx; zy = two_zx_zy + anim_cy; i += 1;
+                    }
+                    probe_sum += i;
+                }
+            }
+            let avg_probe = probe_sum as f32 / probes as f32;
+            let heavy = avg_probe > (probe_iter_max as f32 * 0.55);
+            let max_iter: u32 = if heavy { 128 } else { 256 };
+            let stride: usize = if heavy { 2 } else { 1 };
+            let phase = (tick as usize) & 1;
+            let y_start = if stride == 1 { 0 } else { phase };
+            let x_start = if stride == 1 { 0 } else { phase };
+
+            let mut y = y_start;
+            while y < height {
                 let ny = (y as f32 / h) * 2.0 - 1.0;
                 let zy0 = ny * 1.6;
-                for x in 0..width {
+                let mut x = x_start;
+                while x < width {
                     let nx = (x as f32 / w) * 2.0 - 1.0;
                     let zx0 = nx * 1.6 * aspect;
 
@@ -49,26 +99,36 @@ pub fn render(
                         let zy2 = zy * zy;
                         if zx2 + zy2 > 4.0 { break; }
                         let two_zx_zy = 2.0 * zx * zy;
-                        zx = zx2 - zy2 + c_x;
-                        zy = two_zx_zy + c_y;
+                        zx = zx2 - zy2 + anim_cx;
+                        zy = two_zx_zy + anim_cy;
                         i += 1;
                     }
 
                     let idx = (((i * 32) as usize) & (PALSIZE - 1)) as usize;
-                    framebuffer[y * width + x] = palette.colors[idx];
+                    let col = palette.colors[idx];
+                    // write pixel(s)
+                    framebuffer[y * width + x] = col;
+                    if stride == 2 {
+                        if x + 1 < width { framebuffer[y * width + (x + 1)] = col; }
+                        if y + 1 < height { framebuffer[(y + 1) * width + x] = col; }
+                        if x + 1 < width && y + 1 < height { framebuffer[(y + 1) * width + (x + 1)] = col; }
+                    }
+                    x += stride;
                 }
+                y += stride;
             }
         }
         Mode::IFS2D => {
             // Reversed Julia IFS in 2D, mirroring C++ SET2D/SET2D3
             framebuffer.fill(BGCOLOR);
-            let mut rng = StdRng::seed_from_u64(tick as u64 + 0x2D_2D);
+            let seed_tick = if ifs.freeze_sets { 0 } else { (tick as u64) / 90 };
+            let mut rng = StdRng::seed_from_u64(0x2D_2D + seed_tick);
             let mut x = rng.gen_range(-0.5..0.5);
             let mut y = rng.gen_range(-0.5..0.5);
             // choose 2D transform family (SET2D or SET2D3)
-            let set_idx_2d = if rng.gen_bool(0.5) { 0 } else { 1 };
+            let set_idx_2d = if let Some(s) = ifs.set2d_variant { s } else if rng.gen_bool(0.5) { 0 } else { 1 };
             // animated Julia constant reused from 2D Julia view
-            let c2 = (c_x as f32, c_y as f32);
+            let c2 = (ifs_cx as f32, ifs_cy as f32);
             // burn-in iterations to converge to attractor
             let burn_in = (samples_view / 10).max(300).min(5000);
             for _ in 0..burn_in { iterate_point_2d(&mut x, &mut y, &mut rng, set_idx_2d, c2); }
@@ -88,11 +148,12 @@ pub fn render(
             framebuffer.fill(BGCOLOR);
             let zbuf = match zbuffer.as_deref_mut() { Some(z) => z, None => {
                 // fallback: plot without z if none provided
-                let mut rng = StdRng::seed_from_u64(tick as u64 + 12345);
+                let seed_tick = if ifs.freeze_sets { 0 } else { (tick as u64) / 90 };
+                let mut rng = StdRng::seed_from_u64(12345 + seed_tick);
                 let mut x = rng.gen_range(-0.5..0.5); let mut y = rng.gen_range(-0.5..0.5); let mut z = rng.gen_range(-0.5..0.5);
                 // choose single transform family for this frame
-                let set_idx = rng.gen_range(0..6);
-                let c3 = (c_x as f32, c_y as f32, 0.0f32);
+                let set_idx = if let Some(s) = ifs.set3d_index { s } else { rng.gen_range(0..6) };
+                let c3 = (ifs_cx as f32, ifs_cy as f32, 0.0f32);
                 // burn-in iterations to converge to attractor
                 let burn_in = (samples_view / 10).max(300).min(4000);
                 for _ in 0..burn_in { iterate_point_fixed(&mut x, &mut y, &mut z, &mut rng, set_idx, c3); }
@@ -108,11 +169,12 @@ pub fn render(
             }};
             // clear zbuffer to far depth
             for z in zbuf.iter_mut() { *z = ZDEPTH; }
-            let mut rng_light = StdRng::seed_from_u64(tick as u64 + 9999);
-            let mut rng_view = StdRng::seed_from_u64(tick as u64 + 9999);
+            let seed_tick = if ifs.freeze_sets { 0 } else { (tick as u64) / 90 };
+            let mut rng_light = StdRng::seed_from_u64(9999 + seed_tick);
+            let mut rng_view = StdRng::seed_from_u64(9999 + seed_tick);
             // choose single transform family and julia constant
-            let set_idx = rng_view.gen_range(0..6);
-            let c3 = (c_x as f32, c_y as f32, 0.0f32);
+            let set_idx = if let Some(s) = ifs.set3d_index { s } else { rng_view.gen_range(0..6) };
+            let c3 = (ifs_cx as f32, ifs_cy as f32, 0.0f32);
 
             // build light map first if requested
             if let (Some(light_cam), Some(lbuf)) = (light, lightbuf.as_deref_mut()) {
