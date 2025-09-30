@@ -1,4 +1,4 @@
-3D Reversed Julia Set IFS (Legacy + Rust Port)
+3D Reversed Julia Set IFS
 
 Build and run Rust preview:
 

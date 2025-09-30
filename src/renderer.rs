@@ -60,29 +60,25 @@ pub fn render(
             }
         }
         Mode::IFS2D => {
+            // Reversed Julia IFS in 2D, mirroring C++ SET2D/SET2D3
             framebuffer.fill(BGCOLOR);
-            // 4-map affine IFS filling a square (scale 1/2)
-            let tx = [-0.5f32, 0.5, 0.5, -0.5];
-            let ty = [-0.5f32, -0.5, 0.5, 0.5];
-            let s = 0.5f32;
-            let mut rng = StdRng::seed_from_u64(0x1F5_2D);
+            let mut rng = StdRng::seed_from_u64(tick as u64 + 0x2D_2D);
             let mut x = rng.gen_range(-0.5..0.5);
             let mut y = rng.gen_range(-0.5..0.5);
-            // burn-in to reach attractor
-            for _ in 0..5000 {
-                let i = rng.gen_range(0..4);
-                x = (x - tx[i]) * s + tx[i];
-                y = (y - ty[i]) * s + ty[i];
-            }
-            let total = width * height * 6;
-            for i in 0..total {
-                let bi = rng.gen_range(0..4);
-                x = (x - tx[bi]) * s + tx[bi];
-                y = (y - ty[bi]) * s + ty[bi];
-                let sx = ((x + 0.5) * w) as i32;
-                let sy = ((y + 0.5) * h) as i32;
+            // choose 2D transform family (SET2D or SET2D3)
+            let set_idx_2d = if rng.gen_bool(0.5) { 0 } else { 1 };
+            // animated Julia constant reused from 2D Julia view
+            let c2 = (c_x as f32, c_y as f32);
+            // burn-in iterations to converge to attractor
+            let burn_in = (samples_view / 10).max(300).min(5000);
+            for _ in 0..burn_in { iterate_point_2d(&mut x, &mut y, &mut rng, set_idx_2d, c2); }
+            // draw iterations
+            for i in 0..samples_view {
+                iterate_point_2d(&mut x, &mut y, &mut rng, set_idx_2d, c2);
+                let sx = (((x * 1.6 * aspect) + 1.0) * 0.5 * w) as i32;
+                let sy = (((y * 1.6) + 1.0) * 0.5 * h) as i32;
                 if sx >= 0 && sy >= 0 && (sx as usize) < width && (sy as usize) < height {
-                    let idx = (((i as u32) * 11 + (bi as u32) * 97) & (PALSIZE as u32 - 1)) as usize;
+                    let idx = (((i as u32) * 13) & (PALSIZE as u32 - 1)) as usize;
                     framebuffer[sy as usize * width + sx as usize] = palette.colors[idx];
                 }
             }
@@ -191,6 +187,25 @@ fn iterate_point_fixed(x: &mut f32, y: &mut f32, z: &mut f32, rng: &mut StdRng, 
         if (mask & 0x1) != 0 { *z = -*z; }
     } else if rng.gen_bool(0.15) {
         let tx = -*y; *y = *z; *z = *x; *x = tx;
+    }
+}
+
+#[inline]
+fn iterate_point_2d(x: &mut f32, y: &mut f32, rng: &mut StdRng, set_idx: i32, c2: (f32,f32)) {
+    // subtract Julia constant
+    *x -= c2.0; *y -= c2.1;
+    // apply selected 2D family
+    match set_idx {
+        0 => { let r = transforms::set2d(*x, *y); *x = r.0; *y = r.1; }
+        _ => { let r = transforms::set2d3(*x, *y); *x = r.0; *y = r.1; }
+    }
+    // symmetry similar to MOD8X or MOD4X randomly
+    if rng.gen_bool(0.4) {
+        let mask = rng.gen_range(0u8..4);
+        if (mask & 0x2) != 0 { *x = -*x; }
+        if (mask & 0x1) != 0 { *y = -*y; }
+    } else if rng.gen_bool(0.2) {
+        let tx = -*y; *y = *x; *x = tx; // 90 deg rotate equivalent
     }
 }
 
