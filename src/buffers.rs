@@ -1,4 +1,4 @@
-use crate::constants::{BHEIGHT, BWIDTH, HEIGHT, LHEIGHT, LWIDTH, PALSIZE, WIDTH, ZDEPTH};
+use crate::constants::{BHEIGHT, BWIDTH, HEIGHT, LHEIGHT, LWIDTH, WIDTH, ZDEPTH};
 
 pub struct Framebuffers {
     pub screen: Vec<u32>,
