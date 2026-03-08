@@ -15,7 +15,14 @@ pub const LHEIGHT: i32 = 4096;
 pub const LMIDX: i32 = LWIDTH >> 1;
 pub const LMIDY: i32 = LHEIGHT >> 1;
 
-pub const BGCOLOR: u32 = 0x00103050;
+pub const BGCOLORS: [u32; 5] = [
+    0x00103050,
+    0x00262332,
+    0x00000000,
+    0x00808080,
+    0x00FFFFFF,
+];
+pub const BGCOLOR: u32 = BGCOLORS[0];
 
 pub const PRESETS: [(f32, f32, f32); 9] = [
     (0.0, 0.0, 0.0),

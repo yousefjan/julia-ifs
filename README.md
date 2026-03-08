@@ -3,7 +3,7 @@
 Build and run Rust preview:
 
 ```bash
-cd rust && cargo run --release
+cargo run --release
 ```
 
 Original project page (archived):
